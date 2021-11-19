@@ -52,10 +52,11 @@ struct dump_ctx
    
    uint indentation;
    FILE *file;
-
+   __attribute__((format(printf, 2, 3)))
    void (*dump_printf)(struct dump_ctx *ctx, const char *format, ...);
 };
 
+__attribute__((format(printf, 2, 3)))
 static void 
 dump_ctx_printf(struct dump_ctx *ctx, const char *format, ...)
 {
@@ -87,7 +88,11 @@ dump_enum(
 #define CHR(C)          ctx->dump_printf( ctx, "%c", C )
 #define UIX(I)          ctx->dump_printf( ctx, "0x%x", I )
 #define UID(I)          ctx->dump_printf( ctx, "%u", I )
+#ifdef _WIN32
+#define INSTID(I)       ctx->dump_printf( ctx, "%3u", I )
+#else
 #define INSTID(I)       ctx->dump_printf( ctx, "% 3u", I )
+#endif
 #define SID(I)          ctx->dump_printf( ctx, "%d", I )
 #define FLT(F)          ctx->dump_printf( ctx, "%10.4f", F )
 #define DBL(D)          ctx->dump_printf( ctx, "%10.8f", D )
@@ -724,7 +729,7 @@ struct str_dump_ctx
    int left;
    bool nospace;
 };
-
+__attribute__((format(printf, 2, 3)))
 static void
 str_dump_ctx_printf(struct dump_ctx *ctx, const char *format, ...)
 {

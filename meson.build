@@ -54,6 +54,9 @@ warnings = [
    '-Wmissing-prototypes',
    '-Werror=int-to-pointer-cast',
    '-Wno-overlength-strings',
+   '-Werror=format',
+   '-Wformat=2',
+   '-Wno-pedantic-ms-format'
 ]
 
 foreach w : warnings
@@ -74,7 +77,6 @@ endforeach
 
 prog_python = import('python').find_installation('python3')
 
-libdrm_dep = dependency('libdrm', version : '>=2.4.50')
 thread_dep = dependency('threads')
 epoxy_dep = dependency('epoxy', version: '>= 1.5.4')
 m_dep = cc.find_library('m')
@@ -128,13 +130,16 @@ platforms = get_option('platforms')
 
 require_egl = platforms.contains('egl')
 require_glx = platforms.contains('glx')
+require_wgl = platforms.contains('wgl')
 auto_egl_glx = platforms.contains('auto')
 
 with_egl = require_egl or auto_egl_glx
 with_glx = require_glx or auto_egl_glx
+with_wgl = require_wgl
 
 have_egl = false
 have_glx = false
+have_wgl = false
 
 with_minigbm_allocation = get_option('minigbm_allocation')
 if with_minigbm_allocation
@@ -163,6 +168,22 @@ if with_glx
    else
       assert(not require_glx,
              'glx was explicitely requested but it is not supported by epoxy')
+   endif
+endif
+
+if with_egl or with_glx
+   libdrm_dep = dependency('libdrm', version : '>=2.4.50')
+else
+   libdrm_dep = []
+endif
+
+if with_wgl
+   if cc.has_header('epoxy/wgl.h', dependencies: epoxy_dep) and epoxy_dep.get_pkgconfig_variable('epoxy_has_wgl') == '1'
+      have_wgl = true
+      conf_data.set('HAVE_EPOXY_WGL_H', 1)
+   else
+      assert(not require_wgl,
+             'wgl was explicitely requested but it is not supported by epoxy')
    endif
 endif
 
@@ -195,10 +216,10 @@ with_tests = get_option('tests')
 with_valgrind = get_option('valgrind')
 
 subdir('src')
-subdir('vtest')
 
 if with_tests
    subdir('tests')
+   subdir('vtest')
 endif
 
 lines = [
@@ -212,6 +233,7 @@ lines = [
 
 lines += 'egl:       ' + (have_egl ? 'yes' : 'no')
 lines += 'glx:       ' + (have_glx ? 'yes' : 'no')
+lines += 'wgl:       ' + (have_wgl ? 'yes' : 'no')
 lines += ''
 lines += 'minigbm_alloc: ' + (with_minigbm_allocation ? 'yes' : 'no' )
 lines += ''

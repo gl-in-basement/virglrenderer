@@ -125,7 +125,7 @@ void trace_init(void)
 
    vperfetto_min_startTracing(&config);
 }
-
+__attribute__((format(printf, 1, 2)))
 char *trace_begin(const char* format, ...)
 {
    char buffer[1024];
@@ -149,7 +149,7 @@ static int nesting_depth = 0;
 void trace_init(void)
 {
 }
-
+__attribute__((format(printf, 1, 2)))
 char *trace_begin(const char* format, ...)
 {
    for (int i = 0; i < nesting_depth; ++i)

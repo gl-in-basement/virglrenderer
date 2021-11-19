@@ -327,6 +327,7 @@ struct translate_ctx
    unsigned num_immediates;
 };
 
+__attribute__((format(printf, 2, 3)))
 static void report_error(struct translate_ctx *ctx, const char *format, ...)
 {
    va_list args;

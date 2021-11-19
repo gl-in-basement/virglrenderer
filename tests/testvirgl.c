@@ -25,7 +25,7 @@
 /* helper functions for testing purposes */
 #include <check.h>
 #include <errno.h>
-#include <sys/uio.h>
+//#include <sys/uio.h>
 #include "pipe/p_defines.h"
 #include "pipe/p_format.h"
 #include "util/u_memory.h"

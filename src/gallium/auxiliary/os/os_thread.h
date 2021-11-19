@@ -42,7 +42,10 @@
 
 #include "c11/threads.h"
 
-#ifdef HAVE_PTHREAD
+#if defined(HAVE_PTHREAD) && !defined(_WIN32)
+#define USE_SIGNAL
+#endif
+#ifdef USE_SIGNAL
 #include <signal.h>
 #endif
 
@@ -57,7 +60,7 @@ typedef thrd_t pipe_thread;
 static inline pipe_thread pipe_thread_create( PIPE_THREAD_ROUTINE((*routine), ), void *param )
 {
    pipe_thread thread;
-#ifdef HAVE_PTHREAD
+#ifdef USE_SIGNAL
    sigset_t saved_set, new_set;
    int ret;
 

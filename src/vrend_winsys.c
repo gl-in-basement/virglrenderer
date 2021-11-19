@@ -23,9 +23,13 @@
  **************************************************************************/
 
 #include "vrend_winsys.h"
-
+#include "vrend_debug.h"
 #ifdef HAVE_EPOXY_GLX_H
 #include "vrend_winsys_glx.h"
+#endif
+
+#ifdef HAVE_EPOXY_WGL_H
+#include "vrend_winsys_wgl.h"
 #endif
 
 #include <stddef.h>
@@ -33,7 +37,8 @@
 enum {
    CONTEXT_NONE,
    CONTEXT_EGL,
-   CONTEXT_GLX
+   CONTEXT_GLX,
+   CONTEXT_WGL
 };
 
 static int use_context = CONTEXT_NONE;
@@ -45,6 +50,10 @@ struct virgl_gbm *gbm = NULL;
 
 #ifdef HAVE_EPOXY_GLX_H
 static struct virgl_glx *glx_info = NULL;
+#endif
+
+#ifdef HAVE_EPOXY_WGL_H
+static struct virgl_wgl *wgl_info = NULL;
 #endif
 
 int vrend_winsys_init(uint32_t flags, int preferred_fd)
@@ -85,6 +94,16 @@ int vrend_winsys_init(uint32_t flags, int preferred_fd)
       vrend_printf( "GLX is not supported on this platform\n");
       return -1;
 #endif
+   } else if (flags & VIRGL_RENDERER_USE_WGL) {
+#ifdef HAVE_EPOXY_WGL_H
+      wgl_info = virgl_wgl_init();
+      if (!wgl_info)
+         return -1;
+      use_context = CONTEXT_WGL;
+#else
+      vrend_printf( "WGL is not supported on this platform\n");
+      return -1;
+#endif
    }
 
    return 0;
@@ -110,6 +129,13 @@ void vrend_winsys_cleanup(void)
       use_context = CONTEXT_NONE;
    }
 #endif
+#ifdef HAVE_EPOXY_WGL_H
+   if (use_context == CONTEXT_WGL) {
+      virgl_wgl_destroy(wgl_info);
+      wgl_info = NULL;
+      use_context = CONTEXT_NONE;
+   }
+#endif
 }
 
 virgl_renderer_gl_context vrend_winsys_create_context(struct virgl_gl_ctx_param *param)
@@ -121,6 +147,10 @@ virgl_renderer_gl_context vrend_winsys_create_context(struct virgl_gl_ctx_param 
 #ifdef HAVE_EPOXY_GLX_H
    if (use_context == CONTEXT_GLX)
       return virgl_glx_create_context(glx_info, param);
+#endif
+#ifdef HAVE_EPOXY_WGL_H
+   if (use_context == CONTEXT_WGL)
+      return virgl_wgl_create_context(wgl_info, param);
 #endif
    return NULL;
 }
@@ -139,6 +169,12 @@ void vrend_winsys_destroy_context(virgl_renderer_gl_context ctx)
       return;
    }
 #endif
+#ifdef HAVE_EPOXY_WGL_H
+   if (use_context == CONTEXT_WGL) {
+      virgl_wgl_destroy_context(wgl_info, ctx);
+      return;
+   }
+#endif
 }
 
 int vrend_winsys_make_context_current(virgl_renderer_gl_context ctx)
@@ -151,19 +187,29 @@ int vrend_winsys_make_context_current(virgl_renderer_gl_context ctx)
    if (use_context == CONTEXT_GLX)
       return virgl_glx_make_context_current(glx_info, ctx);
 #endif
+#ifdef HAVE_EPOXY_WGL_H
+   if (use_context == CONTEXT_WGL)
+      return virgl_wgl_make_context_current(wgl_info, ctx);
+#endif
    return -1;
 }
 
 int vrend_winsys_has_gl_colorspace(void)
 {
    bool egl_colorspace = false;
+   bool wgl_colorspace = false;
 #ifdef HAVE_EPOXY_EGL_H
    if (egl)
       egl_colorspace = virgl_has_egl_khr_gl_colorspace(egl);
 #endif
+#ifdef HAVE_EPOXY_WGL_H
+   if (wgl_info)
+      wgl_colorspace = true; //TODO: check extension
+#endif
    return use_context == CONTEXT_NONE ||
          use_context == CONTEXT_GLX ||
-         (use_context == CONTEXT_EGL && egl_colorspace);
+         (use_context == CONTEXT_EGL && egl_colorspace) ||
+         (use_context == CONTEXT_WGL && wgl_colorspace);
 }
 
 int vrend_winsys_get_fourcc_for_texture(uint32_t tex_id, uint32_t format, int *fourcc)

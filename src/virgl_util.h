@@ -63,6 +63,7 @@ void flush_eventfd(int fd);
 
 #ifdef ENABLE_TRACING
 void trace_init(void);
+__attribute__((format(printf, 1, 2)))
 char *trace_begin(const char* format, ...);
 void trace_end(char **dummy);
 

@@ -38,6 +38,9 @@
 #include "pipe/p_config.h"
 #include "pipe/p_compiler.h"
 
+#ifdef _WIN32
+#define DEBUG_MEMORY_IMPLEMENTATION
+#endif
 
 #if defined(PIPE_SUBSYSTEM_EMBEDDED)
 

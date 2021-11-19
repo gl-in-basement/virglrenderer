@@ -26,9 +26,9 @@ option(
   type : 'array',
   value : ['auto'],
   choices : [
-    'egl', 'glx', 'auto'
+    'egl', 'glx', 'wgl', 'auto'
   ],
-  description : 'Platforms support, set to auto to enable all.'
+  description : 'Platforms support, set to auto to enable egl and glx, and set to wgl to use WGL.'
 )
 
 option(

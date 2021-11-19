@@ -74,6 +74,12 @@ vrend_winsys_glx_sources = [
    'vrend_winsys_glx.h',
 ]
 
+vrend_winsys_wgl_sources = [
+   'vrend_winsys_wgl.c',
+   'vrend_winsys_wgl.h',
+   'virgl_win32defs.h',
+]
+
 virgl_depends = [
    gallium_dep,
    epoxy_dep,
@@ -98,6 +104,10 @@ if have_glx
    virgl_depends += [glx_dep]
 endif
 
+if have_wgl
+   virgl_sources += vrend_winsys_wgl_sources
+endif
+
 libvirgl = static_library(
    'virgl',
    virgl_sources,
@@ -116,6 +126,8 @@ libvirgl_dep = declare_dependency(
    include_directories: libvirgl_inc
 )
 
+libtype = get_option('default_library') 
+if libtype == 'shared'
 libvirglrenderer = shared_library(
    'virglrenderer',
    virglrenderer_sources,
@@ -126,6 +138,18 @@ libvirglrenderer = shared_library(
              + revision.to_string(),
    install : true
 )
+else
+libvirglrenderer = static_library(
+   'virglrenderer',
+   virglrenderer_sources,
+   include_directories: [inc_gallium, inc_configuration],
+   dependencies : [virgl_depends, libvirgl_dep],
+   version : binary_age.to_string() + '.'
+             + interface_age.to_string() + '.'
+             + revision.to_string(),
+   install : true
+)
+endif
 
 libvirglrenderer_dep = declare_dependency(
    link_with: libvirglrenderer,

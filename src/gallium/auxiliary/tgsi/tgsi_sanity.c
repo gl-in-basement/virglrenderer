@@ -146,6 +146,7 @@ create_scan_register_dst(struct tgsi_full_dst_register *dst)
    return reg;
 }
 
+__attribute__((format(printf, 2, 3)))
 static void
 report_error(
    struct sanity_check_ctx *ctx,
@@ -165,6 +166,7 @@ report_error(
    ctx->errors++;
 }
 
+__attribute__((format(printf, 2, 3)))
 static void
 report_warning(
    struct sanity_check_ctx *ctx,

@@ -84,6 +84,8 @@ struct virgl_renderer_callbacks {
 
 #endif /* VIRGL_RENDERER_UNSTABLE_APIS */
 
+#define VIRGL_RENDERER_USE_WGL (1 << 6)
+
 VIRGL_EXPORT int virgl_renderer_init(void *cookie, int flags, struct virgl_renderer_callbacks *cb);
 VIRGL_EXPORT void virgl_renderer_poll(void); /* force fences */
 

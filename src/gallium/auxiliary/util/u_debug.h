@@ -57,7 +57,7 @@ extern "C" {
 
 void _debug_vprintf(const char *format, va_list ap);
    
-
+__attribute__((format(printf, 1, 2)))
 static inline void
 _debug_printf(const char *format, ...)
 {
@@ -78,9 +78,11 @@ _debug_printf(const char *format, ...)
  * that is guaranteed to be printed in all platforms)
  */
 #if !defined(PIPE_OS_HAIKU)
+__attribute__((format(printf, 1, 2)))
 static inline void
 debug_printf(const char *format, ...) _util_printf_format(1,2);
 
+__attribute__((format(printf, 1, 2)))
 static inline void
 debug_printf(const char *format, ...)
 {

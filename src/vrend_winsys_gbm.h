@@ -24,8 +24,9 @@
 
 #ifndef VIRGL_GBM_H
 #define VIRGL_GBM_H
-
+#ifdef HAVE_EPOXY_GLX_H
 #include <gbm.h>
+#endif
 #include "vrend_iov.h"
 #include "virglrenderer.h"
 
@@ -55,7 +56,7 @@
 #define GBM_TEST_ALLOC (1 << 15)
 
 #endif
-
+#ifdef HAVE_EPOXY_GLX_H
 /*
  * If fd >= 0, virglrenderer owns the fd since it was opened via a rendernode
  * query. If fd < 0, the gbm device was opened with the fd provided by the
@@ -87,5 +88,5 @@ int virgl_gbm_get_plane_bytes_per_pixel(struct gbm_bo *bo, int plane);
 
 bool virgl_gbm_external_allocation_preferred(uint32_t flags);
 bool virgl_gbm_gpu_import_required(uint32_t flags);
-
+#endif
 #endif
