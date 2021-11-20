@@ -23,9 +23,9 @@
 
 project(
    'virglrenderer', 'c',
-   version: '0.8.2',
+   version: '0.9.0',
    license : 'MIT',
-   meson_version : '>= 0.46',
+   meson_version : '>= 0.49',
    default_options : ['buildtype=release', 'b_ndebug=if-release',
                       'warning_level=3', 'c_std=gnu11']
 )
@@ -39,14 +39,14 @@ project(
 #    and set revision and interface_age to zero
 
 binary_age    = 1
-interface_age = 4
-revision      = 2
+interface_age = 5
+revision      = 3
 
 cc = meson.get_compiler('c')
 
-add_project_arguments('-DHAVE_CONFIG_H=1', language : 'c')
-add_project_arguments('-D_GNU_SOURCE=1', language : 'c')
-add_project_arguments('-DVIRGL_RENDERER_UNSTABLE_APIS', language : 'c')
+if cc.get_id() == 'gcc' and cc.version().version_compare('< 4.1')
+  error('When using GCC, version 4.1 or later is required.')
+endif
 
 warnings = [
    '-Werror=implicit-function-declaration',
@@ -83,14 +83,24 @@ m_dep = cc.find_library('m')
 
 conf_data = configuration_data()
 conf_data.set('VERSION', '0.8.1')
+conf_data.set('_GNU_SOURCE', 1)
+conf_data.set('VIRGL_RENDERER_UNSTABLE_APIS', 1)
 
 with_tracing = get_option('tracing')
 
 if with_tracing != 'none'
-  if not cc.compiles('void f(void* v){}; int main () { void *dummy __attribute__((cleanup (f))) = 0;}')
+  if not cc.compiles('void f(void* v){} int main () { void *dummy __attribute__((cleanup (f))) = 0;}')
      error('Tracing requires compiler support for __attribute__((cleanup))')
 endif
 
+endif
+
+if with_tracing == 'percetto'
+   # percetto uses C++ internally, so we need to link with C++.
+   # TODO: remove -lstdc++ when percetto is a shared library.
+   add_project_link_arguments('-lstdc++', language : 'c')
+   percetto_dep = dependency('percetto', version : '>=0.0.8')
+   conf_data.set('ENABLE_TRACING', 'TRACE_WITH_PERCETTO')
 endif
 
 if with_tracing == 'perfetto'
@@ -112,6 +122,9 @@ endif
 
 if cc.has_header('pthread.h')
    conf_data.set('HAVE_PTHREAD', 1)
+   if cc.has_function('pthread_setaffinity_np', dependencies: thread_dep)
+      conf_data.set('HAVE_PTHREAD_SETAFFINITY', 1)
+   endif
 endif
 
 if cc.has_header('sys/eventfd.h')
@@ -120,6 +133,57 @@ endif
 
 if cc.has_header('sys/select.h')
   conf_data.set('HAVE_SYS_SELECT_H', 1)
+endif
+
+foreach b : ['bswap32', 'bswap64', 'clz', 'clzll', 'expect', 'ffs', 'ffsll',
+             'popcount', 'popcountll', 'types_compatible_p', 'unreachable']
+  if cc.has_function(b)
+    conf_data.set('HAVE___BUILTIN_@0@'.format(b.to_upper()), 1)
+  endif
+endforeach
+
+supported_function_attributes = cc.get_supported_function_attributes([
+  'const', 'flatten', 'format', 'malloc', 'noreturn', 'packed', 'pure',
+  'returns_nonnull', 'unused', 'warn_unused_result', 'weak',
+])
+foreach a : supported_function_attributes
+    conf_data.set('HAVE_FUNC_ATTRIBUTE_@0@'.format(a.to_upper()), 1)
+endforeach
+
+foreach f : ['strtok_r', 'timespec_get']
+  if cc.has_function(f)
+    conf_data.set('HAVE_@0@'.format(f.to_upper()), 1)
+  endif
+endforeach
+
+if host_machine.endian() == 'little'
+  conf_data.set('UTIL_ARCH_LITTLE_ENDIAN', 1)
+  conf_data.set('UTIL_ARCH_BIG_ENDIAN', 0)
+elif host_machine.endian() == 'big'
+  conf_data.set('UTIL_ARCH_LITTLE_ENDIAN', 0)
+  conf_data.set('UTIL_ARCH_BIG_ENDIAN', 1)
+else
+  error('It wasn\'t possible to figure out the endianess of the machine')  
+endif
+
+pipe_arch = host_machine.cpu_family()
+
+if pipe_arch == 'x86'
+  conf_data.set('PIPE_ARCH_X86', true)
+elif pipe_arch == 'x86_64'
+  conf_data.set('PIPE_ARCH_X86_64', true)
+elif pipe_arch == 'ppc'
+  conf_data.set('PIPE_ARCH_PPC', true)
+elif pipe_arch == 'ppc64'
+  conf_data.set('PIPE_ARCH_PPC_64', true)
+elif pipe_arch == 's390x'
+  conf_data.set('PIPE_ARCH_S390', true)
+elif pipe_arch == 'arm'
+  conf_data.set('PIPE_ARCH_ARM', true)
+elif pipe_arch == 'aarch64'
+  conf_data.set('PIPE_ARCH_AARCH64', true)
+else
+  warning('Arch used is not supported')
 endif
 
 if get_option('buildtype') == 'debug'
@@ -153,7 +217,12 @@ if with_egl
    if cc.has_header('epoxy/egl.h', dependencies: epoxy_dep) and epoxy_dep.get_pkgconfig_variable('epoxy_has_egl') == '1'
       gbm_dep = dependency('gbm', version: '>= ' + _gbm_ver, required: require_egl)
       have_egl = gbm_dep.found()
-      conf_data.set('HAVE_EPOXY_EGL_H', 1)
+      if (have_egl)
+         conf_data.set('HAVE_EPOXY_EGL_H', 1)
+      else
+         assert(not require_egl,
+                'egl was explicitely requested which requires gbm, and this is not available')
+      endif
    else
       assert(not require_egl,
              'egl was explicitely requested but it is not supported by epoxy')
@@ -187,6 +256,17 @@ if with_wgl
    endif
 endif
 
+with_venus = get_option('venus-experimental')
+with_venus_validate = get_option('venus-validate')
+if with_venus
+   venus_dep = dependency('vulkan')
+   conf_data.set('ENABLE_VENUS', 1)
+
+   if with_venus_validate
+      conf_data.set('ENABLE_VENUS_VALIDATE', 1)
+   endif
+endif
+
 if cc.compiles('void __attribute__((hidden)) func() {}')
    conf_data.set('HAVE_FUNC_ATTRIBUTE_VISIBILITY', 1)
 endif
@@ -194,6 +274,9 @@ endif
 configure_file(input : 'config.h.meson',
                output : 'config.h',
                configuration : conf_data)
+
+add_project_arguments('-imacros', meson.build_root() / 'config.h', language : 'c')
+add_project_arguments('-DHAVE_CONFIG_H=1', language : 'c')
 
 pkgconf_data = configuration_data()
 pkgconf_data.set('PACKAGE_VERSION', meson.project_version())
@@ -209,7 +292,7 @@ pkg_config = configure_file(input : 'virglrenderer.pc.in',
 install_data(pkg_config,
              install_dir: get_option('libdir') + '/pkgconfig')
 
-inc_configuration = include_directories('.')
+inc_configuration = include_directories(['.', 'src'])
 
 with_fuzzer = get_option('fuzzer')
 with_tests = get_option('tests')
@@ -218,6 +301,7 @@ with_valgrind = get_option('valgrind')
 subdir('src')
 
 if with_tests
+   assert(have_egl, 'Tests require EGL, but it is not available')
    subdir('tests')
    subdir('vtest')
 endif
@@ -236,6 +320,8 @@ lines += 'glx:       ' + (have_glx ? 'yes' : 'no')
 lines += 'wgl:       ' + (have_wgl ? 'yes' : 'no')
 lines += ''
 lines += 'minigbm_alloc: ' + (with_minigbm_allocation ? 'yes' : 'no' )
+lines += ''
+lines += 'venus:     ' + (with_venus ? 'yes' : 'no' )
 lines += ''
 lines += 'tests:     ' + (with_tests ? 'yes' : 'no' )
 lines += 'fuzzer:    ' + (with_fuzzer ? 'yes' : 'no' )

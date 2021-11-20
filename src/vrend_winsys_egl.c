@@ -39,6 +39,7 @@
 #include "util/u_memory.h"
 
 #include "virglrenderer.h"
+#include "vrend_winsys.h"
 #include "vrend_winsys_egl.h"
 #include "virgl_hw.h"
 #include "vrend_winsys_gbm.h"
@@ -75,11 +76,15 @@ struct virgl_egl {
    EGLContext egl_ctx;
    uint32_t extension_bits;
    EGLSyncKHR signaled_fence;
+   bool different_gpu;
 };
 
 static bool virgl_egl_has_extension_in_string(const char *haystack, const char *needle)
 {
    const unsigned needle_len = strlen(needle);
+
+   if (!haystack)
+      return false;
 
    if (needle_len == 0)
       return false;
@@ -121,6 +126,148 @@ static int virgl_egl_init_extensions(struct virgl_egl *egl, const char *extensio
    return 0;
 }
 
+#ifdef ENABLE_MINIGBM_ALLOCATION
+
+struct egl_funcs {
+   PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplay;
+   PFNEGLQUERYDEVICESEXTPROC eglQueryDevices;
+   PFNEGLQUERYDEVICESTRINGEXTPROC eglQueryDeviceString;
+};
+
+static bool virgl_egl_get_interface(struct egl_funcs *funcs)
+{
+   const char *client_extensions = eglQueryString (NULL, EGL_EXTENSIONS);
+
+   assert(funcs);
+
+   if (virgl_egl_has_extension_in_string(client_extensions, "EGL_KHR_platform_base")) {
+      funcs->eglGetPlatformDisplay =
+         (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress ("eglGetPlatformDisplay");
+   } else if (virgl_egl_has_extension_in_string(client_extensions, "EGL_EXT_platform_base")) {
+      funcs->eglGetPlatformDisplay =
+         (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress ("eglGetPlatformDisplayEXT");
+   }
+
+   if (!funcs->eglGetPlatformDisplay)
+      return false;
+
+   if (!virgl_egl_has_extension_in_string(client_extensions, "EGL_EXT_platform_device"))
+      return false;
+
+   if (!virgl_egl_has_extension_in_string(client_extensions, "EGL_EXT_device_enumeration"))
+      return false;
+
+   funcs->eglQueryDevices = (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress ("eglQueryDevicesEXT");
+   if (!funcs->eglQueryDevices)
+      return false;
+
+   if (!virgl_egl_has_extension_in_string(client_extensions, "EGL_EXT_device_query"))
+      return false;
+
+   funcs->eglQueryDeviceString = (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress("eglQueryDeviceStringEXT");
+   if (!funcs->eglQueryDeviceString)
+      return false;
+
+  return true;
+}
+
+static EGLint virgl_egl_find_3d_device(struct gbm_device_info *dev_infos, EGLint num_devices, uint32_t flags)
+{
+   EGLint d;
+
+   for (d = 0; d < num_devices; d++) {
+       if ((dev_infos[d].dev_type_flags & flags) == flags
+           && dev_infos[d].dev_type_flags & GBM_DEV_TYPE_FLAG_3D)
+          return d;
+   }
+
+   return -1;
+}
+
+static EGLint virgl_egl_find_matching_device(struct gbm_device_info *dev_infos, EGLint num_devices, int dri_node_num)
+{
+   EGLint d;
+
+   for (d = 0; d < num_devices; d++) {
+       if (dev_infos[d].dri_node_num == dri_node_num)
+          return d;
+   }
+
+   return -1;
+}
+
+static EGLDeviceEXT virgl_egl_get_device(struct virgl_egl *egl, struct egl_funcs *funcs) {
+   EGLint num_devices = 0;
+   EGLint max_devices = 64;
+   EGLDeviceEXT devices[64];
+   struct gbm_device_info dev_infos[64];
+   struct gbm_device_info gbm_dev_info;
+   EGLint device_num = -1;
+   EGLint d;
+
+   if (gbm_detect_device_info(0, gbm_device_get_fd(egl->gbm->device), &gbm_dev_info) < 0)
+      return EGL_NO_DEVICE_EXT;
+
+   if (!funcs->eglQueryDevices(max_devices, devices, &num_devices))
+      return EGL_NO_DEVICE_EXT;
+
+   /* We query EGL_DRM_DEVICE_FILE_EXT without checking EGL_EXT_device_drm extension,
+    * we just get NULL when it is not available. Otherwise we would have to query it
+    * after initializing display for every device.
+    */
+   for (d = 0; d < num_devices; d++) {
+       const char *dev_node = funcs->eglQueryDeviceString(devices[d], EGL_DRM_DEVICE_FILE_EXT);
+       memset(&dev_infos[d], 0, sizeof(dev_infos[d]));
+       if (dev_node) {
+          if (gbm_detect_device_info_path(0, dev_node, dev_infos+d) < 0)
+             return false;
+       } else {
+          dev_infos[d].dri_node_num = -1;
+       }
+   }
+
+   if (getenv("VIRGL_PREFER_DGPU"))
+      /* Find a discrete GPU. */
+      device_num = virgl_egl_find_3d_device(dev_infos, num_devices, GBM_DEV_TYPE_FLAG_DISCRETE);
+
+   if (device_num >= 0) {
+      egl->different_gpu = dev_infos[device_num].dri_node_num != gbm_dev_info.dri_node_num;
+   } else if (gbm_dev_info.dev_type_flags & GBM_DEV_TYPE_FLAG_ARMSOC) {
+      /* Find 3D device on ARM SOC. */
+      device_num = virgl_egl_find_3d_device(dev_infos, num_devices, GBM_DEV_TYPE_FLAG_ARMSOC);
+   }
+
+   if (device_num < 0) {
+      /* Try to match GBM device. */
+      device_num = virgl_egl_find_matching_device(dev_infos, num_devices, gbm_dev_info.dri_node_num);
+   }
+   if (device_num < 0)
+      return EGL_NO_DEVICE_EXT;
+
+  return devices[device_num];
+}
+
+static bool virgl_egl_get_display(struct virgl_egl *egl)
+{
+   struct egl_funcs funcs = { 0 };
+   EGLDeviceEXT device;
+
+   if (!egl->gbm)
+      return false;
+
+   if (!virgl_egl_get_interface(&funcs))
+      return false;
+
+   device = virgl_egl_get_device(egl, &funcs);
+
+   if (device == EGL_NO_DEVICE_EXT)
+      return false;
+
+   egl->egl_display = funcs.eglGetPlatformDisplay(EGL_PLATFORM_DEVICE_EXT, device, NULL);
+   return true;
+}
+#endif /* ENABLE_MINIGBM_ALLOCATION */
+
 struct virgl_egl *virgl_egl_init(struct virgl_gbm *gbm, bool surfaceless, bool gles)
 {
    static EGLint conf_att[] = {
@@ -155,9 +302,15 @@ struct virgl_egl *virgl_egl_init(struct virgl_gbm *gbm, bool surfaceless, bool g
       goto fail;
 
    egl->gbm = gbm;
+   egl->different_gpu = false;
    const char *client_extensions = eglQueryString (NULL, EGL_EXTENSIONS);
 
-   if (client_extensions && strstr(client_extensions, "EGL_KHR_platform_base")) {
+#ifdef ENABLE_MINIGBM_ALLOCATION
+   if (virgl_egl_get_display(egl)) {
+     /* Make -Wdangling-else happy. */
+   } else /* Fallback to surfaceless. */
+#endif
+   if (virgl_egl_has_extension_in_string(client_extensions, "EGL_KHR_platform_base")) {
       PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
          (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress ("eglGetPlatformDisplay");
 
@@ -170,7 +323,7 @@ struct virgl_egl *virgl_egl_init(struct virgl_gbm *gbm, bool surfaceless, bool g
       } else
          egl->egl_display = get_platform_display (EGL_PLATFORM_GBM_KHR,
                                                   (EGLNativeDisplayType)egl->gbm->device, NULL);
-   } else if (client_extensions && strstr(client_extensions, "EGL_EXT_platform_base")) {
+   } else if (virgl_egl_has_extension_in_string(client_extensions, "EGL_EXT_platform_base")) {
       PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
          (PFNEGLGETPLATFORMDISPLAYEXTPROC) eglGetProcAddress ("eglGetPlatformDisplayEXT");
 
@@ -405,121 +558,148 @@ bool virgl_has_egl_khr_gl_colorspace(struct virgl_egl *egl)
    return has_bit(egl->extension_bits, EGL_KHR_GL_COLORSPACE);
 }
 
-#ifdef ENABLE_MINIGBM_ALLOCATION
-void *virgl_egl_image_from_dmabuf(struct virgl_egl *egl, struct gbm_bo *bo)
+void *virgl_egl_image_from_dmabuf(struct virgl_egl *egl,
+                                  uint32_t width,
+                                  uint32_t height,
+                                  uint32_t drm_format,
+                                  uint64_t drm_modifier,
+                                  uint32_t plane_count,
+                                  const int *plane_fds,
+                                  const uint32_t *plane_strides,
+                                  const uint32_t *plane_offsets)
 {
-   int ret;
-   EGLImageKHR image;
-   int fds[VIRGL_GBM_MAX_PLANES] = {-1, -1, -1, -1};
-   int num_planes = gbm_bo_get_plane_count(bo);
-   // When the bo has 3 planes with modifier support, it requires 37 components.
-   EGLint khr_image_attrs[37] = {
-      EGL_WIDTH,
-      gbm_bo_get_width(bo),
-      EGL_HEIGHT,
-      gbm_bo_get_height(bo),
-      EGL_LINUX_DRM_FOURCC_EXT,
-      (int)gbm_bo_get_format(bo),
-      EGL_NONE,
-   };
+   EGLint attrs[6 + VIRGL_GBM_MAX_PLANES * 10 + 1];
+   uint32_t count;
 
-   if (num_planes < 0 || num_planes > VIRGL_GBM_MAX_PLANES)
-      return (void *)EGL_NO_IMAGE_KHR;
+   assert(VIRGL_GBM_MAX_PLANES <= 4);
+   assert(plane_count && plane_count <= VIRGL_GBM_MAX_PLANES);
 
-   for (int plane = 0; plane < num_planes; plane++) {
-      uint32_t handle = gbm_bo_get_handle_for_plane(bo, plane).u32;
-      ret = virgl_gbm_export_fd(egl->gbm->device, handle, &fds[plane]);
-      if (ret < 0) {
-         vrend_printf( "failed to export plane handle\n");
-         image = (void *)EGL_NO_IMAGE_KHR;
-         goto out_close;
+   count = 0;
+   attrs[count++] = EGL_WIDTH;
+   attrs[count++] = width;
+   attrs[count++] = EGL_HEIGHT;
+   attrs[count++] = height;
+   attrs[count++] = EGL_LINUX_DRM_FOURCC_EXT;
+   attrs[count++] = drm_format;
+   for (uint32_t i = 0; i < plane_count; i++) {
+      if (i < 3) {
+         attrs[count++] = EGL_DMA_BUF_PLANE0_FD_EXT + i * 3;
+         attrs[count++] = plane_fds[i];
+         attrs[count++] = EGL_DMA_BUF_PLANE0_PITCH_EXT + i * 3;
+         attrs[count++] = plane_strides[i];
+         attrs[count++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT + i * 3;
+         attrs[count++] = plane_offsets[i];
       }
-   }
 
-   size_t attrs_index = 6;
-   for (int plane = 0; plane < num_planes; plane++) {
-      khr_image_attrs[attrs_index++] = EGL_DMA_BUF_PLANE0_FD_EXT + plane * 3;
-      khr_image_attrs[attrs_index++] = fds[plane];
-      khr_image_attrs[attrs_index++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT + plane * 3;
-      khr_image_attrs[attrs_index++] = gbm_bo_get_offset(bo, plane);
-      khr_image_attrs[attrs_index++] = EGL_DMA_BUF_PLANE0_PITCH_EXT + plane * 3;
-      khr_image_attrs[attrs_index++] = gbm_bo_get_stride_for_plane(bo, plane);
       if (has_bit(egl->extension_bits, EGL_EXT_IMAGE_DMA_BUF_IMPORT_MODIFIERS)) {
-         const uint64_t modifier = gbm_bo_get_modifier(bo);
-         khr_image_attrs[attrs_index++] =
-         EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT + plane * 2;
-         khr_image_attrs[attrs_index++] = modifier & 0xfffffffful;
-         khr_image_attrs[attrs_index++] =
-         EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT + plane * 2;
-         khr_image_attrs[attrs_index++] = modifier >> 32;
+         if (i == 3) {
+            attrs[count++] = EGL_DMA_BUF_PLANE3_FD_EXT;
+            attrs[count++] = plane_fds[i];
+            attrs[count++] = EGL_DMA_BUF_PLANE3_PITCH_EXT;
+            attrs[count++] = plane_strides[i];
+            attrs[count++] = EGL_DMA_BUF_PLANE3_OFFSET_EXT;
+            attrs[count++] = plane_offsets[i];
+         }
+
+	 if (drm_modifier != DRM_FORMAT_MOD_INVALID) {
+            attrs[count++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT + i * 2;
+            attrs[count++] = (uint32_t)drm_modifier;
+            attrs[count++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT + i * 2;
+            attrs[count++] = (uint32_t)(drm_modifier >> 32);
+	 }
       }
    }
+   attrs[count++] = EGL_NONE;
+   assert(count <= ARRAY_SIZE(attrs));
 
-   khr_image_attrs[attrs_index++] = EGL_NONE;
-   image = eglCreateImageKHR(egl->egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL,
-                             khr_image_attrs);
-
-out_close:
-   for (int plane = 0; plane < num_planes; plane++)
-      close(fds[plane]);
-
-   return (void*)image;
-}
-
-void *virgl_egl_aux_plane_image_from_dmabuf(struct virgl_egl *egl, struct gbm_bo *bo, int plane)
-{
-   int ret;
-   EGLImageKHR image = EGL_NO_IMAGE_KHR;
-   int fd = -1;
-
-   int bytes_per_pixel = virgl_gbm_get_plane_bytes_per_pixel(bo, plane);
-   if (bytes_per_pixel != 1 && bytes_per_pixel != 2)
-      return (void *)EGL_NO_IMAGE_KHR;
-
-   uint32_t handle = gbm_bo_get_handle_for_plane(bo, plane).u32;
-   ret = drmPrimeHandleToFD(gbm_device_get_fd(egl->gbm->device), handle, DRM_CLOEXEC, &fd);
-   if (ret < 0) {
-      vrend_printf("failed to export plane handle %d\n", errno);
-      return (void *)EGL_NO_IMAGE_KHR;
-   }
-
-   EGLint khr_image_attrs[17] = {
-      EGL_WIDTH,
-      virgl_gbm_get_plane_width(bo, plane),
-      EGL_HEIGHT,
-      virgl_gbm_get_plane_height(bo, plane),
-      EGL_LINUX_DRM_FOURCC_EXT,
-      (int) (bytes_per_pixel == 1 ? GBM_FORMAT_R8 : GBM_FORMAT_GR88),
-      EGL_DMA_BUF_PLANE0_FD_EXT,
-      fd,
-      EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-      gbm_bo_get_offset(bo, plane),
-      EGL_DMA_BUF_PLANE0_PITCH_EXT,
-      gbm_bo_get_stride_for_plane(bo, plane),
-   };
-
-   if (has_bit(egl->extension_bits, EGL_EXT_IMAGE_DMA_BUF_IMPORT_MODIFIERS)) {
-      const uint64_t modifier = gbm_bo_get_modifier(bo);
-      khr_image_attrs[12] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
-      khr_image_attrs[13] = modifier & 0xfffffffful;
-      khr_image_attrs[14] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
-      khr_image_attrs[15] = modifier >> 32;
-      khr_image_attrs[16] = EGL_NONE;
-   } else {
-      khr_image_attrs[12] = EGL_NONE;
-   }
-
-   image = eglCreateImageKHR(egl->egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, khr_image_attrs);
-
-   close(fd);
-   return (void*)image;
+   return (void *)eglCreateImageKHR(egl->egl_display,
+                                    EGL_NO_CONTEXT,
+                                    EGL_LINUX_DMA_BUF_EXT,
+                                    (EGLClientBuffer)NULL,
+                                    attrs);
 }
 
 void virgl_egl_image_destroy(struct virgl_egl *egl, void *image)
 {
    eglDestroyImageKHR(egl->egl_display, image);
 }
-#endif
+
+#ifdef ENABLE_MINIGBM_ALLOCATION
+void *virgl_egl_image_from_gbm_bo(struct virgl_egl *egl, struct gbm_bo *bo)
+{
+   int ret;
+   void *image = NULL;
+   int fds[VIRGL_GBM_MAX_PLANES] = {-1, -1, -1, -1};
+   uint32_t strides[VIRGL_GBM_MAX_PLANES];
+   uint32_t offsets[VIRGL_GBM_MAX_PLANES];
+   int num_planes = gbm_bo_get_plane_count(bo);
+
+   if (num_planes < 0 || num_planes > VIRGL_GBM_MAX_PLANES)
+      return NULL;
+
+   for (int plane = 0; plane < num_planes; plane++) {
+      uint32_t handle = gbm_bo_get_handle_for_plane(bo, plane).u32;
+      ret = virgl_gbm_export_fd(egl->gbm->device, handle, &fds[plane]);
+      if (ret < 0) {
+         vrend_printf( "failed to export plane handle\n");
+         goto out_close;
+      }
+
+      strides[plane] = gbm_bo_get_stride_for_plane(bo, plane);
+      offsets[plane] = gbm_bo_get_offset(bo, plane);
+   }
+
+   image = virgl_egl_image_from_dmabuf(egl,
+                                       gbm_bo_get_width(bo),
+                                       gbm_bo_get_height(bo),
+                                       gbm_bo_get_format(bo),
+                                       gbm_bo_get_modifier(bo),
+                                       num_planes,
+                                       fds,
+                                       strides,
+                                       offsets);
+
+out_close:
+   for (int plane = 0; plane < num_planes; plane++)
+      close(fds[plane]);
+
+   return image;
+}
+
+void *virgl_egl_aux_plane_image_from_gbm_bo(struct virgl_egl *egl, struct gbm_bo *bo, int plane)
+{
+   int ret;
+   void *image = NULL;
+   int fd = -1;
+
+   int bytes_per_pixel = virgl_gbm_get_plane_bytes_per_pixel(bo, plane);
+   if (bytes_per_pixel != 1 && bytes_per_pixel != 2)
+      return NULL;
+
+   uint32_t handle = gbm_bo_get_handle_for_plane(bo, plane).u32;
+   ret = drmPrimeHandleToFD(gbm_device_get_fd(egl->gbm->device), handle, DRM_CLOEXEC, &fd);
+   if (ret < 0) {
+      vrend_printf("failed to export plane handle %d\n", errno);
+      return NULL;
+   }
+
+   const uint32_t format = bytes_per_pixel == 1 ? GBM_FORMAT_R8 : GBM_FORMAT_GR88;
+   const uint32_t stride = gbm_bo_get_stride_for_plane(bo, plane);
+   const uint32_t offset = gbm_bo_get_offset(bo, plane);
+   image = virgl_egl_image_from_dmabuf(egl,
+                                       virgl_gbm_get_plane_width(bo, plane),
+                                       virgl_gbm_get_plane_height(bo, plane),
+                                       format,
+                                       gbm_bo_get_modifier(bo),
+                                       1,
+                                       &fd,
+                                       &stride,
+                                       &offset);
+   close(fd);
+
+   return image;
+}
+#endif /* ENABLE_MINIGBM_ALLOCATION */
 
 bool virgl_egl_supports_fences(struct virgl_egl *egl)
 {
@@ -555,4 +735,9 @@ bool virgl_egl_export_signaled_fence(struct virgl_egl *egl, int *out_fd) {
 bool virgl_egl_export_fence(struct virgl_egl *egl, EGLSyncKHR fence, int *out_fd) {
    *out_fd = eglDupNativeFenceFDANDROID(egl->egl_display, fence);
    return *out_fd != EGL_NO_NATIVE_FENCE_FD_ANDROID;
+}
+
+bool virgl_egl_different_gpu(struct virgl_egl *egl)
+{
+   return egl->different_gpu;
 }

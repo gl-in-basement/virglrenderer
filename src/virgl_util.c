@@ -34,8 +34,10 @@
 #endif
 #include <unistd.h>
 
+#include "util/os_misc.h"
 #include "util/u_pointer.h"
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -81,6 +83,7 @@ int create_eventfd(unsigned int initval)
 #ifdef HAVE_EVENTFD_H
    return eventfd(initval, EFD_CLOEXEC | EFD_NONBLOCK);
 #else
+   (void)initval;
    return -1;
 #endif
 }
@@ -114,6 +117,75 @@ void flush_eventfd(int fd)
     } while ((len == -1 && errno == EINTR) || len == sizeof(value));
 }
 
+static
+void virgl_default_logger(const char *fmt, va_list va)
+{
+   static FILE* fp = NULL;
+   if (NULL == fp) {
+      const char* log = getenv("VIRGL_LOG_FILE");
+      if (log) {
+         char *log_prefix = strdup(log);
+         char *log_suffix = strstr(log_prefix, "%PID%");
+         if (log_suffix) {
+            *log_suffix = 0;
+            log_suffix += 5;
+            int len = strlen(log) + 32;
+            char *name = malloc(len);
+            snprintf(name, len, "%s%d%s", log_prefix, getpid(), log_suffix);
+            fp = fopen(name, "a");
+            free(name);
+         } else {
+            fp = fopen(log, "a");
+         }
+         free(log_prefix);
+         if (NULL == fp) {
+            fprintf(stderr, "Can't open %s\n", log);
+            fp = stderr;
+         }
+      } else {
+            fp = stderr;
+      }
+   }
+   vfprintf(fp, fmt, va);
+   fflush(fp);
+}
+
+static
+void virgl_null_logger(UNUSED const char *fmt, UNUSED va_list va)
+{
+}
+
+static virgl_debug_callback_type virgl_logger = virgl_default_logger;
+
+virgl_debug_callback_type virgl_log_set_logger(virgl_debug_callback_type logger)
+{
+   virgl_debug_callback_type old = virgl_logger;
+
+   /* virgl_null_logger is internal */
+   if (old == virgl_null_logger)
+      old = NULL;
+   if (!logger)
+      logger = virgl_null_logger;
+
+   virgl_logger = logger;
+   return old;
+}
+
+void virgl_logv(const char *fmt, va_list va)
+{
+   assert(virgl_logger);
+   virgl_logger(fmt, va);
+}
+
+#if ENABLE_TRACING == TRACE_WITH_PERCETTO
+PERCETTO_CATEGORY_DEFINE(VIRGL_PERCETTO_CATEGORIES)
+
+void trace_init(void)
+{
+  PERCETTO_INIT(PERCETTO_CLOCK_DONT_CARE);
+}
+#endif
+
 #if ENABLE_TRACING == TRACE_WITH_PERFETTO
 void trace_init(void)
 {
@@ -125,19 +197,14 @@ void trace_init(void)
 
    vperfetto_min_startTracing(&config);
 }
-__attribute__((format(printf, 1, 2)))
-char *trace_begin(const char* format, ...)
+
+const char *trace_begin(const char *scope)
 {
-   char buffer[1024];
-   va_list args;
-   va_start (args, format);
-   vsnprintf (buffer, sizeof(buffer), format, args);
-   va_end (args);
-   vperfetto_min_beginTrackEvent_VMM(buffer);
-   return (void *)1;
+   vperfetto_min_beginTrackEvent_VMM(scope);
+   return scope;
 }
 
-void trace_end(char **dummy)
+void trace_end(const char **dummy)
 {
    (void)dummy;
    vperfetto_min_endTrackEvent_VMM();
@@ -149,34 +216,23 @@ static int nesting_depth = 0;
 void trace_init(void)
 {
 }
-__attribute__((format(printf, 1, 2)))
-char *trace_begin(const char* format, ...)
+
+const char *trace_begin(const char *scope)
 {
    for (int i = 0; i < nesting_depth; ++i)
       fprintf(stderr, "  ");
 
-   fprintf(stderr, "ENTER:");
-   char *buffer;
-   va_list args;
-   va_start (args, format);
-   int size = vasprintf(&buffer, format, args);
-
-   if (size < 0)
-      buffer=strdup("error");
-
-   va_end (args);
-   fprintf(stderr, "%s\n", buffer);
+   fprintf(stderr, "ENTER:%s\n", scope);
    nesting_depth++;
 
-   return buffer;
+   return scope;
 }
 
-void trace_end(char **func_name)
+void trace_end(const char **func_name)
 {
    --nesting_depth;
    for (int i = 0; i < nesting_depth; ++i)
       fprintf(stderr, "  ");
    fprintf(stderr, "LEAVE %s\n", *func_name);
-   free(*func_name);
 }
 #endif

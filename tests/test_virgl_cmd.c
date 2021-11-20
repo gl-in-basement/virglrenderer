@@ -67,7 +67,7 @@ START_TEST(virgl_test_overlap_obj_id)
 }
 END_TEST
 
-#ifdef PIPE_ARCH_LITTLE_ENDIAN
+#if UTIL_ARCH_LITTLE_ENDIAN
 static const uint32_t test_green = 0xff00ff00;
 #else
 static const uint32_t test_green = 0x00ff00ff;
@@ -1048,6 +1048,8 @@ int main(void)
 
   if (getenv("VRENDTEST_USE_EGL_SURFACELESS"))
      context_flags |= VIRGL_RENDERER_USE_SURFACELESS;
+   if (getenv("VRENDTEST_USE_EGL_GLES"))
+      context_flags |= VIRGL_RENDERER_USE_GLES;
 
   s = virgl_init_suite();
   sr = srunner_create(s);
