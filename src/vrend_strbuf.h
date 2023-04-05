@@ -46,6 +46,7 @@ struct vrend_strbuf {
 
 static inline void strbuf_set_error(struct vrend_strbuf *sb)
 {
+   assert(0 && "strbuf_set_error called.\n");
    sb->error_state = true;
 }
 
@@ -118,13 +119,28 @@ static inline void strbuf_vappendf(struct vrend_strbuf *sb, const char *fmt, va_
    va_list cp;
    va_copy(cp, ap);
 
+#ifdef _WIN32
+   int len=_vsnprintf(NULL, 0, fmt, ap);
+   assert(len>=0);
+   if(len >= (int)(sb->alloc_size - sb->size)) {
+      if (!strbuf_grow(sb, len))
+        return;
+   }
+   int ret=_vsnprintf(sb->buf + sb->size, sb->alloc_size - sb->size, fmt, cp);
+   (void)ret;
+   assert(ret>=0);
+   sb->size+=len;
+#else
    int len = vsnprintf(sb->buf + sb->size, sb->alloc_size - sb->size, fmt, ap);
+   assert(len>=0);
    if (len >= (int)(sb->alloc_size - sb->size)) {
       if (!strbuf_grow(sb, len))
         return;
       vsnprintf(sb->buf + sb->size, sb->alloc_size - sb->size, fmt, cp);
    }
    sb->size += len;
+#endif
+
 }
 
 __attribute__((format(printf, 2, 3)))
@@ -140,14 +156,27 @@ static inline void strbuf_vfmt(struct vrend_strbuf *sb, const char *fmt, va_list
 {
    va_list cp;
    va_copy(cp, ap);
-
+#ifdef _WIN32
+   int len=_vsnprintf(NULL, 0, fmt, ap);
+   assert(len>=0);
+   if(len >= (int)(sb->alloc_size)) {
+      if (!strbuf_grow(sb, len))
+        return;
+   }
+   int ret=_vsnprintf(sb->buf, sb->alloc_size, fmt, cp);
+   (void)ret;
+   assert(ret>=0);
+   sb->size=len;
+#else
    int len = vsnprintf(sb->buf, sb->alloc_size, fmt, ap);
+   assert(len>=0);
    if (len >= (int)(sb->alloc_size)) {
       if (!strbuf_grow(sb, len))
         return;
       vsnprintf(sb->buf, sb->alloc_size, fmt, cp);
    }
    sb->size = len;
+#endif
 }
 
 __attribute__((format(printf, 2, 3)))
@@ -220,6 +249,4 @@ static inline void strarray_dump_with_line_numbers(struct vrend_strarray *sa)
       } while (end);
    }
 }
-
-
 #endif

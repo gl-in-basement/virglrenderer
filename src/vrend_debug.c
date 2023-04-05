@@ -27,7 +27,9 @@
 #include "util/u_debug.h"
 #include <stdlib.h>
 #include <stdio.h>
-
+#ifdef _WIN32
+#include "virgl_win32defs.h"
+#endif
 static const char *command_names[VIRGL_MAX_COMMANDS] = {
    "NOP",
    "CREATE_OBJECT",

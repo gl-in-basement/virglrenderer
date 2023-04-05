@@ -34,7 +34,19 @@
 #ifndef _OS_MEMORY_H_
 #define _OS_MEMORY_H_
 
+<<<<<<< HEAD:src/gallium/auxiliary/os/os_memory.h
+
+#include "pipe/p_config.h"
+#include "pipe/p_compiler.h"
+
+#ifdef _WIN32
+#define DEBUG_MEMORY_IMPLEMENTATION
+#endif
+
+#if defined(PIPE_SUBSYSTEM_EMBEDDED)
+=======
 #if defined(EMBEDDED_DEVICE)
+>>>>>>> 8c140709bc0f1f58ea84d3d609354952cf4caaf1:src/mesa/util/os_memory.h
 
 #ifdef __cplusplus
 extern "C" {

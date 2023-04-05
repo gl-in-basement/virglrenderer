@@ -4280,9 +4280,9 @@ static void vrend_draw_bind_vertex_legacy(struct vrend_context *ctx,
       } else {
          enable_bitmask |= (1 << loc);
          if (util_format_is_pure_integer(ve->base.src_format)) {
-            glVertexAttribIPointer(loc, ve->nr_chan, ve->type, vbo->base.stride, (void *)(unsigned long)(ve->base.src_offset + vbo->base.buffer_offset));
+            glVertexAttribIPointer(loc, ve->nr_chan, ve->type, vbo->base.stride, (void *)(uintptr_t)(ve->base.src_offset + vbo->base.buffer_offset));
          } else {
-            glVertexAttribPointer(loc, ve->nr_chan, ve->type, ve->norm, vbo->base.stride, (void *)(unsigned long)(ve->base.src_offset + vbo->base.buffer_offset));
+            glVertexAttribPointer(loc, ve->nr_chan, ve->type, ve->norm, vbo->base.stride, (void *)(uintptr_t)(ve->base.src_offset + vbo->base.buffer_offset));
          }
          glVertexAttribDivisorARB(loc, ve->base.instance_divisor);
       }
@@ -5003,12 +5003,12 @@ int vrend_draw_vbo(struct vrend_context *ctx,
 
       if (indirect_handle) {
          if (indirect_params_res)
-            glMultiDrawArraysIndirectCountARB(mode, (GLvoid const *)(unsigned long)info->indirect.offset,
+            glMultiDrawArraysIndirectCountARB(mode, (GLvoid const *)(uintptr_t)info->indirect.offset,
                                               info->indirect.indirect_draw_count_offset, info->indirect.draw_count, info->indirect.stride);
          else if (info->indirect.draw_count > 1)
-            glMultiDrawArraysIndirect(mode, (GLvoid const *)(unsigned long)info->indirect.offset, info->indirect.draw_count, info->indirect.stride);
+            glMultiDrawArraysIndirect(mode, (GLvoid const *)(uintptr_t)info->indirect.offset, info->indirect.draw_count, info->indirect.stride);
          else
-            glDrawArraysIndirect(mode, (GLvoid const *)(unsigned long)info->indirect.offset);
+            glDrawArraysIndirect(mode, (GLvoid const *)(uintptr_t)info->indirect.offset);
       } else if (info->instance_count > 0) {
          if (info->start_instance > 0)
             glDrawArraysInstancedBaseInstance(mode, start, count, info->instance_count, info->start_instance);
@@ -5034,31 +5034,31 @@ int vrend_draw_vbo(struct vrend_context *ctx,
 
       if (indirect_handle) {
          if (indirect_params_res)
-            glMultiDrawElementsIndirectCountARB(mode, elsz, (GLvoid const *)(unsigned long)info->indirect.offset,
+            glMultiDrawElementsIndirectCountARB(mode, elsz, (GLvoid const *)(uintptr_t)info->indirect.offset,
                                                 info->indirect.indirect_draw_count_offset, info->indirect.draw_count, info->indirect.stride);
          else if (info->indirect.draw_count > 1)
-            glMultiDrawElementsIndirect(mode, elsz, (GLvoid const *)(unsigned long)info->indirect.offset, info->indirect.draw_count, info->indirect.stride);
+            glMultiDrawElementsIndirect(mode, elsz, (GLvoid const *)(uintptr_t)info->indirect.offset, info->indirect.draw_count, info->indirect.stride);
          else
-            glDrawElementsIndirect(mode, elsz, (GLvoid const *)(unsigned long)info->indirect.offset);
+            glDrawElementsIndirect(mode, elsz, (GLvoid const *)(uintptr_t)info->indirect.offset);
       } else if (info->index_bias) {
          if (info->instance_count > 0) {
             if (info->start_instance > 0)
-               glDrawElementsInstancedBaseVertexBaseInstance(mode, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset,
+               glDrawElementsInstancedBaseVertexBaseInstance(mode, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset,
                                                              info->instance_count, info->index_bias, info->start_instance);
             else
-               glDrawElementsInstancedBaseVertex(mode, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset, info->instance_count, info->index_bias);
+               glDrawElementsInstancedBaseVertex(mode, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset, info->instance_count, info->index_bias);
 
 
          } else if (info->min_index != 0 || info->max_index != (unsigned)-1)
-            glDrawRangeElementsBaseVertex(mode, info->min_index, info->max_index, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset, info->index_bias);
+            glDrawRangeElementsBaseVertex(mode, info->min_index, info->max_index, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset, info->index_bias);
          else
-            glDrawElementsBaseVertex(mode, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset, info->index_bias);
+            glDrawElementsBaseVertex(mode, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset, info->index_bias);
       } else if (info->instance_count > 1) {
-         glDrawElementsInstancedARB(mode, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset, info->instance_count);
+         glDrawElementsInstancedARB(mode, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset, info->instance_count);
       } else if (info->min_index != 0 || info->max_index != (unsigned)-1)
-         glDrawRangeElements(mode, info->min_index, info->max_index, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset);
+         glDrawRangeElements(mode, info->min_index, info->max_index, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset);
       else
-         glDrawElements(mode, info->count, elsz, (void *)(unsigned long)sub_ctx->ib.offset);
+         glDrawElements(mode, info->count, elsz, (void *)(uintptr_t)sub_ctx->ib.offset);
    }
 
    if (info->primitive_restart) {
@@ -6171,7 +6171,7 @@ static bool do_wait(struct vrend_fence *fence, bool can_block)
    do {
       GLenum glret = glClientWaitSync(fence->glsyncobj, 0, timeout);
       if (glret == GL_WAIT_FAILED) {
-         vrend_printf( "wait sync failed: illegal fence object %p\n", fence->glsyncobj);
+         vrend_printf( "wait sync failed: illegal fence object %p\n", (void*)fence->glsyncobj);
       }
       done = glret != GL_TIMEOUT_EXPIRED;
    } while (!done && can_block);
@@ -6391,6 +6391,7 @@ int vrend_renderer_init(const struct vrend_if_cbs *cbs, uint32_t flags)
          vrend_state.max_texture_cube_size = 16384;
 
 #ifndef NDEBUG
+vrend_printf( "virglrenderer debug mode!\n");
    vrend_init_debug_flags();
 #endif
 
@@ -10526,6 +10527,9 @@ static void vrend_renderer_fill_caps_v1(int gl_ver, int gles_ver, union virgl_ca
 
 static void vrend_renderer_fill_caps_v2(int gl_ver, int gles_ver,  union virgl_caps *caps)
 {
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
+
    GLint max;
    GLfloat range[2];
    uint32_t video_memory;
@@ -10544,28 +10548,43 @@ static void vrend_renderer_fill_caps_v2(int gl_ver, int gles_ver,  union virgl_c
    glGetFloatv(GL_ALIASED_POINT_SIZE_RANGE, range);
    caps->v2.min_aliased_point_size = range[0];
    caps->v2.max_aliased_point_size = range[1];
+#ifdef _WIN32
+   int error=(int)glGetError();
+   vrend_printf("Warning: glGetError()=%d occurred at glGetFloatv(GL_ALIASED_POINT_SIZE_RANGE). Ignoring since it is win32...\n", error);
+#endif
+
 
    glGetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, range);
    caps->v2.min_aliased_line_width = range[0];
    caps->v2.max_aliased_line_width = range[1];
+assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (gl_ver > 0) {
       glGetFloatv(GL_SMOOTH_POINT_SIZE_RANGE, range);
       caps->v2.min_smooth_point_size = range[0];
       caps->v2.max_smooth_point_size = range[1];
+assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
       glGetFloatv(GL_SMOOTH_LINE_WIDTH_RANGE, range);
       caps->v2.min_smooth_line_width = range[0];
       caps->v2.max_smooth_line_width = range[1];
    }
+assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    glGetFloatv(GL_MAX_TEXTURE_LOD_BIAS, &caps->v2.max_texture_lod_bias);
    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, (GLint*)&caps->v2.max_vertex_attribs);
+assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (gl_ver >= 32 || (vrend_state.use_gles && gl_ver >= 30))
       glGetIntegerv(GL_MAX_VERTEX_OUTPUT_COMPONENTS, &max);
    else
       max = 64; // minimum required value
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    caps->v2.max_vertex_outputs = max / 4;
 
@@ -10583,26 +10602,38 @@ static void vrend_renderer_fill_caps_v2(int gl_ver, int gles_ver,  union virgl_c
    VREND_DEBUG(dbg_features, NULL, "Texture limits: 2D:%u 3D:%u Cube:%u\n",
                vrend_state.max_texture_2d_size, vrend_state.max_texture_3d_size,
                vrend_state.max_texture_cube_size);
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (has_feature(feat_geometry_shader)) {
       glGetIntegerv(GL_MAX_GEOMETRY_OUTPUT_VERTICES, (GLint*)&caps->v2.max_geom_output_vertices);
       glGetIntegerv(GL_MAX_GEOMETRY_TOTAL_OUTPUT_COMPONENTS, (GLint*)&caps->v2.max_geom_total_output_components);
    }
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (has_feature(feat_tessellation)) {
       glGetIntegerv(GL_MAX_TESS_PATCH_COMPONENTS, &max);
       caps->v2.max_shader_patch_varyings = max / 4;
    } else
       caps->v2.max_shader_patch_varyings = 0;
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (has_feature(feat_texture_gather)) {
        glGetIntegerv(GL_MIN_PROGRAM_TEXTURE_GATHER_OFFSET, &caps->v2.min_texture_gather_offset);
        glGetIntegerv(GL_MAX_PROGRAM_TEXTURE_GATHER_OFFSET, &caps->v2.max_texture_gather_offset);
    }
 
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
+
    if (has_feature(feat_texture_buffer_range)) {
       glGetIntegerv(GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT, (GLint*)&caps->v2.texture_buffer_offset_alignment);
    }
+
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (has_feature(feat_ssbo)) {
       glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, (GLint*)&caps->v2.shader_buffer_offset_alignment);
@@ -10618,6 +10649,8 @@ static void vrend_renderer_fill_caps_v2(int gl_ver, int gles_ver,  union virgl_c
       glGetIntegerv(GL_MAX_COMBINED_SHADER_STORAGE_BLOCKS,
                     (GLint*)&caps->v2.max_combined_shader_buffers);
    }
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    if (has_feature(feat_images)) {
       glGetIntegerv(GL_MAX_VERTEX_IMAGE_UNIFORMS, &max);
@@ -10632,10 +10665,14 @@ static void vrend_renderer_fill_caps_v2(int gl_ver, int gles_ver,  union virgl_c
       if (gl_ver > 0) /* Seems GLES doesn't support multisample images */
          glGetIntegerv(GL_MAX_IMAGE_SAMPLES, (GLint*)&caps->v2.max_image_samples);
    }
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected gjz010_1, please check for failures in initialization");
 
-   if (has_feature(feat_storage_multisample))
+   if (has_feature(feat_storage_multisample)){
+      assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected gjz010_2, please check for failures in initialization");
       caps->v1.max_samples = vrend_renderer_query_multisample_caps(caps->v1.max_samples, &caps->v2);
-
+   }
    caps->v2.capability_bits |= VIRGL_CAP_TGSI_INVARIANT | VIRGL_CAP_SET_MIN_SAMPLES |
                                VIRGL_CAP_TGSI_PRECISE | VIRGL_CAP_APP_TWEAK_SUPPORT;
 
@@ -10916,6 +10953,8 @@ void vrend_renderer_fill_caps(uint32_t set, uint32_t version,
 
    if (!fill_capset2)
       return;
+   assert(glGetError() == GL_NO_ERROR &&
+          "Stale error state detected, please check for failures in initialization");
 
    vrend_renderer_fill_caps_v2(gl_ver, gles_ver, caps);
 }

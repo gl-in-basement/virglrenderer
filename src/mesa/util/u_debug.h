@@ -63,7 +63,7 @@ extern "C" {
 
 void _debug_vprintf(const char *format, va_list ap);
    
-
+__attribute__((format(printf, 1, 2)))
 static inline void
 _debug_printf(const char *format, ...)
 {
@@ -83,10 +83,16 @@ _debug_printf(const char *format, ...)
  * - avoid outputing large strings (512 bytes is the current maximum length
  * that is guaranteed to be printed in all platforms)
  */
+<<<<<<< HEAD:src/gallium/auxiliary/util/u_debug.h
+#if !defined(PIPE_OS_HAIKU)
+__attribute__((format(printf, 1, 2)))
+=======
 #if !DETECT_OS_HAIKU
+>>>>>>> 8c140709bc0f1f58ea84d3d609354952cf4caaf1:src/mesa/util/u_debug.h
 static inline void
 debug_printf(const char *format, ...) _util_printf_format(1,2);
 
+__attribute__((format(printf, 1, 2)))
 static inline void
 debug_printf(const char *format, ...)
 {

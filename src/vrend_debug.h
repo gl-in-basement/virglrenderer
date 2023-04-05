@@ -71,6 +71,7 @@ unsigned vrend_debug(const struct vrend_context *ctx, enum virgl_debug_flags fla
 
 void vrend_debug_add_flag(enum virgl_debug_flags flag);
 
+__attribute__((format(printf, 1, 2)))
 static inline void vrend_printf(const char *fmt, ...)
 {
    va_list va;

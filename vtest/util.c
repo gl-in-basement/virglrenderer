@@ -27,8 +27,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
-
+#else if _WIN32
+#include <winsock2.h>
+#endif
 int vtest_wait_for_fd_read(int fd)
 {
    fd_set read_fds;
